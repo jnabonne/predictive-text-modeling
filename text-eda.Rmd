@@ -1,0 +1,291 @@
+---
+title: "EDA of Corpus from Web Content"
+author: "jnabonne (January'19)"
+#date: "January '19"
+output:
+  html_document:
+    df_print: paged
+always_allow_html: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, cache=TRUE, eval=TRUE, warning=FALSE, message=FALSE, fig.height=4, fig.align = "center")
+library(quanteda) ; library(readtext)
+library(ggplot2) ; library(gridExtra)
+```
+
+```{r filepath, echo=F}
+# setting up paths to text files
+filepath_blogs   <- "en_US.blogs.10k.txt"
+filepath_news    <- "en_US.news.10k.txt"
+filepath_twitter <- "en_US.twitter.10k.txt"
+# downloading the wordpress dico for strong language
+profanities_url <- 'https://www.freewebheaders.com/download/files/wordpress-comment-blacklist-words-list_text-file_2018-08-17.zip'
+download.file(profanities_url, destfile="profanities.zip", method="curl")
+profanities <- read.csv(unzip("profanities.zip"), header=F , comment.char='#', colClasses='character')[[1]]
+```
+
+```{r functions, echo=F}
+# func to load a text file line per line (nb as param)
+extractLines <- function (filepath, nb_lines=10) {
+    con <- file(filepath, 'r')
+    mtext <- readLines(con, nb_lines)
+    close(con)
+    mtext
+}
+
+# func to directly load a text file in a quanteda corpus
+loadFile2Quanteda <- function (filepath, lang='en_US') {
+    print(paste("filename:", filepath))
+    print(paste("size:", round(file.info(filepath)$size / 1024^2, 2), "MB"))
+    print(paste("nb. lines:", R.utils::countLines(filepath_twitter)))
+    #dc <- readtext(filepath)) ; max(nchar(dc))
+    corpus <- corpus(readtext(filepath))
+    metadoc(corpus, "language") <- lang
+    metadoc(corpus, "source")   <- filepath
+    corpus
+}
+
+# func to plot the top ngrams
+plot_ngram_dfm <- function (ngram_dfm, n=10, title='n-gram') {
+    plot_data <- textstat_frequency(ngram_dfm, n=n)[,1:2]
+    ggplot(data=plot_data, aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+        geom_bar(stat='identity') + labs(x=title) +
+        theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+}
+```
+
+
+# Executive Summary
+The first step in building a predictive model for text is understanding the distribution and relationship between the words, tokens, and phrases in the text.
+The goal of this task is to understand the basic relationships that can be observed in the data and prepare to build your first linguistic models.
+
+This work is part of the **Capstone project with SwiftKey** which provided the dataset.
+The main library used here has been [`quanteda`](https://quanteda.io).
+
+This report wants to cover and answer the following:
+
+1. **Exploratory analysis**, understanding the distribution of words and relationship between them
+2. **Understand frequencies of words and word pairs**
+
+There is no clear conclusion in this analysis but rather some intelligence gathering for the rest of our project.
+Mostly we understood which preparatory steps and parameters value (ie. cleaning) we should use.
+
+---
+
+# Exploratory Analysis
+
+## File-checks & Corpus
+
+First of all, using an homemade function _(using `quanteda::corpus(readtext(file)`)_, 
+we create a **quanteda corpus** and load it with samples _(to speed up things as we are just in discovery mode, not yet modelling)_ the 3 files from the dataset.
+It also print some basic summaries of the loaded file.
+```{r corpus, cache=T}
+crps <- loadFile2Quanteda(filepath_blogs)
+crps <- crps + loadFile2Quanteda(filepath_news)
+crps <- crps + loadFile2Quanteda(filepath_twitter)
+summary(crps, showmeta=T)
+```
+
+---
+
+## Tokens and TDM/DFM
+
+We now proceed to the tokenization of the corpus docs and build the Term Document Matrix _(TDM or DFM)_.  
+In order to better understand the corpus, several tokenization and DFM are created playing with the available options:
+
+1. **raw:** untouched text from dataset
+2. **lowercase:** uniformisation of the text _(so 'House' and 'house' can be treated as the same)_
+3. **clean:** removing punctuation and numbers and hastags from tweets
+4. **filter:** filtering to catch up strong language _(using wordpress profanity list)_
+5. **stopword:** removing low-values words _(eg. the, to, of, in,...)_ to better identify meaningful words
+
+```{r tokenization, cache=T}
+tkns_raw   <- tokens(crps)
+tkns_clean <- tokens(crps, remove_numbers=T, remove_punct=T)
+crps_dfm          <- dfm(crps)
+crps_dfm_clean    <- dfm(crps, remove_numbers=T, remove_punct=T, remove="#*")
+crps_dfm_twitless <- dfm(crps, remove_numbers=T, remove_punct=T, remove="#*") #remove tweet#
+crps_dfm_filter   <- dfm(crps, remove_numbers=T, remove_punct=T, remove=c("#*", profanities))
+crps_dfm_stopword <- dfm(crps, remove_numbers=T, remove_punct=T, remove=c("#*", profanities, stopwords('english')))
+```
+
+
+#### Word counts
+
+We can now get the **number of words per document** for our 5 tests:
+```{r word-count, echo=F}
+data.frame(raw=ntoken(tkns_raw),
+     lowercase=ntoken(crps_dfm),
+       cleaned=ntoken(crps_dfm_clean),
+      twitless=ntoken(crps_dfm_twitless),
+      filtered=ntoken(crps_dfm_filter),
+    stopworded=ntoken(crps_dfm_stopword))
+```
+
+Next check is equivalent but counting **unique words** per document:
+```{r word-count-unique, echo=F}
+data.frame(raw=ntype(tkns_raw),
+     lowercase=ntype(crps_dfm),
+       cleaned=ntype(crps_dfm_clean),
+      twitless=ntype(crps_dfm_twitless),
+      filtered=ntype(crps_dfm_filter),
+     stopwords=ntype(crps_dfm_stopword))
+```
+
+Finally, we can look at the most **recurrent words**
+```{r word-recurrency}
+cbind(lowercase=textstat_frequency(crps_dfm, n=10)[,2:1],
+       filtered=textstat_frequency(crps_dfm_filter, n=10)[,2:1],
+      stopwords=textstat_frequency(crps_dfm_stopword, n=10)[,2:1])
+```
+It is quite easy to spot the differences between each of our category _(they are nothing alike!)_; meaning that some bad parameters can ruin a study.
+
+
+#### Vocabulary
+
+As a bonus, we can display a cloudtag, which is a nice visualization to get a glimpse of the main vocabulary.
+This one is done based on our last setting _(clean+filter+stopword)_ so we get a idea of meaningful words.
+```{r cloudtag}
+    textplot_wordcloud(crps_dfm_stopword, max_words = 100)
+```
+
+```{r cleaning}
+rm(tkns_raw)
+rm(crps_dfm, crps_dfm_clean, crps_dfm_twitless, crps_dfm_filter, crps_dfm_stopword)
+```
+
+---
+
+## n-Grams
+
+Because the final project's objective is to predict a word based on 1 to 3 pre-existing words, we need to build a huge n-gram containing: a bigram _(n-gram with n=2)_, a trigram _(n=3)_ and a tetragram _(n=4)_
+```{r ngrams, cache=T}
+ngram     <- tokens_ngrams(tkns_clean, n=2:4)  # n=2:4 to generate bi,tri and tetragrams
+ngram_dfm <- dfm(ngram, remove=c(stopwords('english'), profanities))
+```
+```{r ngrams-234, cache=T, echo=F}
+ngram_2 <- tokens_ngrams(tkns_clean, n=2)
+ngram_3 <- tokens_ngrams(tkns_clean, n=3)
+ngram_4 <- tokens_ngrams(tkns_clean, n=4)
+ngram_2_dfm <- dfm(ngram_2, remove=c(stopwords('english'), profanities))
+ngram_3_dfm <- dfm(ngram_3, remove=c(stopwords('english'), profanities))
+ngram_4_dfm <- dfm(ngram_4, remove=c(stopwords('english'), profanities))
+```
+
+We have now access to the **numbers of ngram** per types:
+```{r ngram-count, echo=F}
+data.frame(bigram=summary(ngram_2)[,1],
+          trigram=summary(ngram_3)[,1],
+        tetragram=summary(ngram_4)[,1],
+        ngram_234=summary(ngram)[,1])
+```
+
+
+#### Plotting n-grams
+
+Plotting the most recurrent n-gram for our 3 combinations is probably the best way to see their repartition
+```{r fullgram-plot, eval=F}
+ggplot(data=textstat_frequency(ngram_dfm, n=15)[,1:2], 
+             aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+             geom_bar(stat='identity') + labs(x="top ngram") +
+             theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+```
+```{r ngram-2-plot, cache=T, echo=F}
+p2 <- ggplot(data=textstat_frequency(ngram_2_dfm, n=15)[,1:2], 
+             aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+             geom_bar(stat='identity') + labs(x="top bigram") +
+             theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+```
+```{r ngram-3-plot, cache=T, echo=F}
+p3 <- ggplot(data=textstat_frequency(ngram_3_dfm, n=15)[,1:2], 
+             aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+             geom_bar(stat='identity') + labs(x="top trigram") +
+             theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+```
+```{r ngram-4-plot, cache=T, echo=F}
+p4 <- ggplot(data=textstat_frequency(ngram_4_dfm, n=15)[,1:2], 
+             aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+             geom_bar(stat='identity') + labs(x="top tetragram") +
+             theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+```
+```{r ngram-plotting, cache=T, echo=F}
+grid.arrange(p2, p3, p4, ncol=3)
+```
+The disparity seems to get smoother the bigger the ngram are _(diff in frequence are between 1k-4k for bigrams, 300-100 for trigrams and 80-30 for tetragrams)_, 
+this should be reflected in the final results, and seems quite logical, the more words we have, the more accurata we should predict.
+
+
+#### Vocabulary _(bis)_
+
+We can also try to get an idea of the vocabulary used per document source; 
+we can look at the top tetragrams since they have more complexity/meaning that bi/trigram
+```{r ngrams-docs, cache=T, echo=F}
+pblogs   <- ggplot(data=textstat_frequency(ngram_4_dfm[1], n=15)[,1:2], 
+             aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+             geom_bar(stat='identity') + labs(x="top ngram from blogs") +
+             theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+pnews    <- ggplot(data=textstat_frequency(ngram_4_dfm[2], n=15)[,1:2], 
+             aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+             geom_bar(stat='identity') + labs(x="top ngrams from news") +
+             theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+ptwitter <- ggplot(data=textstat_frequency(ngram_4_dfm[3], n=15)[,1:2], 
+             aes(y=frequency, x=reorder(feature, -frequency), fill=feature)) +
+             geom_bar(stat='identity') + labs(x="top ngrams from twitter") +
+             theme(axis.text.x=element_text(angle = 60, hjust = 1)) + guides(fill=F)
+grid.arrange(pblogs, pnews, ptwitter, ncol=3)
+```
+It appears that twitter is more of the conversation register while blogs and news seem to have a more complex structures.
+
+
+---
+
+## Coverage Tests
+First let's define a small function to compute the coverage from the token frequencies in a unigram
+```{r coverage}
+ngram_1 <- tokens_ngrams(tkns_clean, n=1)
+coverage <- function (ngram, cover) {
+    dfm_freq <- textstat_frequency(dfm(ngram, remove=c(stopwords('english'), profanities)))[,2]
+    total <- cover * sum(dfm_freq) ; counts <- 0 ; i <- 1
+    while (counts < total | i < length(dfm_freq)) {
+      counts <- counts + dfm_freq[i]
+      i <- i+1
+    }
+    i
+}
+```
+According to this homemade function we need `r coverage(ngram_1, .5)` and `r coverage(ngram_1, .9)` words to respectively get 50% and 90% coverage.  
+The plot below display more values that could help us tunned our model to get the best accuracy/performance ratio
+```{r coverages, cache=T, echo=F}
+plot(data.frame(
+           words=c(coverage(ngram_1, .5),
+                   coverage(ngram_1, .66),
+                   coverage(ngram_1, .75),
+                   coverage(ngram_1, .9),
+                   coverage(ngram_1, .99)),coverage=c(50,66,75,90,99)),
+     type='l')
+```
+without any surprise over 90% it takes a lot of effort _(much more words)_ to get additional percentage points but it also seems that is starts to be already the case around 80%...
+
+---
+
+# Conclusions & Next Steps
+- It is clear that parameters and cleaning steps have a huge impact on the results ; therefore, it will be primary to confirm our various settings with model comparisons.
+
+- Obvisouly, given our objectives, we will not be using the stopword filtering _(we want every highly recurring word combinations regardless of their meaning value)_ but I will definitly try to use the resulting top unique words as a way to predict when we don't have relevan ngram in store
+
+- it comes without saying that I allowed myself to use rather-small samples to speed up things as we were just in discovery mode, not yet modelling ; t won't be possible in next phase so...
+
+- Except for the creation of the big ngram and DFMs, there were no memory problems but it will most probably be an issue during the next phases _(modelling)_ so the tests made on coverage could be of use to optimize the balance between model size and performances.  
+
+- This EDA has been performed on a sample of the original dataset. The first step to optimise it was to find adequate file loading function _(I started with `readLines` but switch to the more effective `readtext`)_. The next steps, if necessary, would be to split the `corpus_segment`.
+
+- Looking for optimizing the loading has lead me to the discovery of the `quanteda` library, I could not be more thanksful _(although I would have love to do that before reading the still-mentor-recommended-but-outdated-50p-tutorial for the more complex `tm` library)_
+
+- More _(litterate)_ content could be added to the corpus to improve the accuracy of our futur model. I will try to find some relevant one _(but always cautious about the memory/model size)_
+
+- Playing with dictionnary to either detect&remove words from foreign languages or keep only thesaurized english words was quite disapointing as it was time/ressources consumming _(not displayed here for that reason)_ and did not help reduce much the ngram size.
+
+---
+
+_That's all folks! Thanks for reading it 'till the end._
