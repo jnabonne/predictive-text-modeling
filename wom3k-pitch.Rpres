@@ -1,0 +1,71 @@
+Word-O-Matic 3000
+========================================================
+author: JNabonne
+date: 04/02/2019
+autosize: true
+font-family: 'Helvetica'
+transition: rotate
+
+Context / About
+========================================================
+
+- Capstone project for **JHU Data Science Specialization**
+- **Goal:** to create a predictive model to guess next word
+- **Dataset given by SwiftKey** with english text from:
+    1. Blogs (~210MB)
+    2. News (~205MB)
+    3. Twitter feed (~170MB)
+
+- Very little guidance from professors  
+_(just the main objective, couples of links about [NLP](https://en.wikipedia.org/wiki/Natural_language_processing), [ngram](https://en.wikipedia.org/wiki/Katz%27s_back-off_model) and [backoff](https://en.wikipedia.org/wiki/N-gram) algorithm and some warnings about memory challenges!)_
+
+- **Very challenging and rewarding: learn a lot!**
+
+
+
+Result: a nice Shiny app
+========================================================
+<small>
+- The application is **available on shiny server** [here](https://jnabonne.shinyapps.io/wom3k/)
+- **Usage is quite straight forward:**
+    1. start typing a sentence in the left section
+    2. wait a few second to get some proposition (in blue on the right side)
+- **App will offer you:**
+    * the best answer from my algo (cf. next slide for more detail)
+    * as a bonus, a text-to-speech button to hear it
+    * if any, other alternative answers found by the model
+- There is also a **special tab briefly explaining the app**
+</small>
+
+
+The GUI
+========================================================
+<small>
+Below is a screenshot of the Shiny app GUI with the two sections:
+
+1. **left:** where to type in your words
+2. **right**: the result tab with the answer in blue  
+_tips: you can swith tabs to gather some more info_
+
+<center>![wom3k-gui](./wom3k-screenshot.png)</center>
+</small>
+
+The Model and the algorithm behind
+========================================================
+
+<small>Following the EDA (cf. [milestone report](https://rpubs.com/jnabonne/eda-swiftkey-dataset)), `quanteda` is used to create various ngram (from 1-grams up to 5-grams) which are manually enriched with statistics and probability calculus ; this is the base of the model.  
+**The algo used is a stupid-backoff** version _(simplified version of the [Katz'one](https://en.wikipedia.org/wiki/Katz%27s_back-off_model) with much better performances)_ that, when given a sentence, will:
+
+1. count the number of words `n` in it
+2. look in the (n+1)-gram data if it can find the next word
+3. if not it will 'back-off': take input the last (n-1) words & look in n-grams
+4. if not, back-off again and again until either finding an answer  
+or ending up at unigram level (1-gram)
+5. the algo will return the best candidate possible
+
+<small>     **Example if you type in 5 words _"please father I want to"_:**  
+it will only keep _"father I want to"_ and look in 5-grams for an answer ; if nothing...  
+it will look in 4grams for _"I want to"_, 3grams for _"want to"_ & 2grams for _"to"_  
+if nothing works, it will dumbly return the most probable word from the corpus
+</small>
+</small>
